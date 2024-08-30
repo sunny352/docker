@@ -16,5 +16,5 @@
 ## 说明
 
 * docker-compose.yml中定义了一个mongo单节点副本集
-* start.sh脚本会创建mongo的集群key文件和初始化脚本，并启动docker compose集群
+* start.sh脚本会创建mongo的集群key文件、启动docker compose集群并且初始化集群
 * stop.sh脚本会停止docker compose集群

@@ -8,12 +8,14 @@ if [ ! -f mongo-keyfile ]; then
     chown 999:999 mongo-keyfile
 fi
 
-#如果不存在init-mongo.js文件，则创建
-if [ ! -f init-mongo.js ]; then
-    echo "找不到init-mongo.js文件，创建中..."
-    echo "rs.initiate();" > init-mongo.js
-fi
-
 #启动docker-compose
 echo "启动docker-compose"
 docker compose up -d
+
+#等待mongo启动
+echo "等待mongo启动"
+sleep 10
+
+#初始化mongo
+echo "初始化mongo"
+docker exec -it mongo-rs0 mongo --authenticationDatabase admin -u root -p 123456 --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: '10.0.68.124:27017'}]})"

@@ -2,6 +2,7 @@ version: '3'
 services:
     mongo:
         image: mongo:5.0 # 5.0及以上均可
+        container_name: mongo-rs0
         ports:
             - "27017:27017"
         expose:
@@ -13,6 +14,5 @@ services:
             TZ: "Asia/Shanghai"
         volumes:
             - "./mongo:/data/db" # 数据库数据存储位置
-            - "./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js" # 初始化数据库脚本
             - "./mongo-keyfile:/etc/mongo-keyfile:ro" # 集群通信密钥
         command: [ "mongod", "--replSet", "rs0", "--keyFile", "/etc/mongo-keyfile" ] # 集群配置
