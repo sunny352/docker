@@ -16,4 +16,4 @@
 ## 说明
 
 * start.sh脚本会创建mongo的集群key文件、创建并启动docker compose集群并且初始化集群
-* stop.sh脚本会停止docker compose集群
+* stop.sh脚本会停止docker compose集群并删除相关容器和网络
