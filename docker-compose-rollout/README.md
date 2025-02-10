@@ -57,7 +57,7 @@
 └── 示例环境（用于测试和演示）：
     ├── build-example.sh      # 示例服务构建脚本
     ├── docker-compose.yml    # 示例环境配置
-    ├── nginx/               # 示例代理配置
+    ├── caddy/               # 示例代理配置
     └── web-example/         # 示例Web服务
 ```
 
