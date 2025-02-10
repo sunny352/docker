@@ -1,0 +1,6 @@
+:80 {
+    # Reverse proxy to web-example service
+    handle /* {
+        reverse_proxy web-example:8080
+    }
+}

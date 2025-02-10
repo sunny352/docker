@@ -1,0 +1,32 @@
+version: '3'
+
+# 这是一个用于测试滚动更新脚本的示例环境配置
+# 实际使用时，将你自己的服务配置替换到这里即可
+
+services:
+  # Caddy 作为前端代理，用于验证服务可用性
+  caddy:
+    image: caddy:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - web-example
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # 示例Web服务，用于演示滚动更新效果
+  # 你可以将此服务替换为你自己的应用
+  web-example:
+    image: web-example:latest
+    expose:
+      - "8080"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
