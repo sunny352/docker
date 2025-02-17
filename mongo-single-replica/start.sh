@@ -41,8 +41,8 @@ services:
 EOL
 fi
 
-#启动docker-compose
-echo "启动docker-compose"
+#启动docker compose
+echo "启动docker compose"
 docker compose up -d
 
 #等待mongo启动

@@ -1,11 +1,96 @@
 #!/bin/bash
 
-# 可配置部分
-CLUSTER_NAME="mongo-cluster1"  # 集群名称
-BASE_PORT=27017               # 基础端口号
-MONGO_VERSION="5.0"          # MongoDB版本
-MONGO_USERNAME="root"        # MongoDB用户名
-MONGO_PASSWORD="123456"      # MongoDB密码
+# 默认配置
+DEFAULT_CLUSTER_NAME="mongo-cluster1"
+DEFAULT_BASE_PORT=27017
+DEFAULT_MONGO_VERSION="5.0"
+DEFAULT_MONGO_USERNAME="root"
+DEFAULT_MONGO_PASSWORD="123456"
+
+# 帮助信息
+show_usage() {
+    echo "用法: $0 [选项]"
+    echo "选项:"
+    echo "  -h, --help                显示此帮助信息"
+    echo "  -n, --name NAME           设置集群名称 (默认: ${DEFAULT_CLUSTER_NAME})"
+    echo "  -p, --port PORT           设置基础端口号 (默认: ${DEFAULT_BASE_PORT})"
+    echo "                            将会使用连续的4个端口:"
+    echo "                            - PORT:   mongos路由服务"
+    echo "                            - PORT+1: config配置服务"
+    echo "                            - PORT+2: shard1分片服务"
+    echo "                            - PORT+3: shard2分片服务"
+    echo "  -v, --version VERSION     设置MongoDB版本 (默认: ${DEFAULT_MONGO_VERSION})"
+    echo "  -u, --username USERNAME   设置MongoDB用户名 (默认: ${DEFAULT_MONGO_USERNAME})"
+    echo "  -w, --password PASSWORD   设置MongoDB密码 (默认: ${DEFAULT_MONGO_PASSWORD})"
+    echo "  --host-ip IP              手动指定主机IP (可选)"
+    exit 1
+}
+
+# 参数解析
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_usage
+            ;;
+        -n|--name)
+            CLUSTER_NAME="$2"
+            shift 2
+            ;;
+        -p|--port)
+            BASE_PORT="$2"
+            shift 2
+            ;;
+        -v|--version)
+            MONGO_VERSION="$2"
+            shift 2
+            ;;
+        -u|--username)
+            MONGO_USERNAME="$2"
+            shift 2
+            ;;
+        -w|--password)
+            MONGO_PASSWORD="$2"
+            shift 2
+            ;;
+        --host-ip)
+            MANUAL_HOST_IP="$2"
+            shift 2
+            ;;
+        *)
+            echo "错误: 未知参数 $1"
+            show_usage
+            ;;
+    esac
+done
+
+# 设置默认值（如果未通过参数指定）
+CLUSTER_NAME=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}
+BASE_PORT=${BASE_PORT:-$DEFAULT_BASE_PORT}
+MONGO_VERSION=${MONGO_VERSION:-$DEFAULT_MONGO_VERSION}
+MONGO_USERNAME=${MONGO_USERNAME:-$DEFAULT_MONGO_USERNAME}
+MONGO_PASSWORD=${MONGO_PASSWORD:-$DEFAULT_MONGO_PASSWORD}
+
+# 验证必要参数
+if ! [[ "$BASE_PORT" =~ ^[0-9]+$ ]] || [ "$BASE_PORT" -lt 1024 ] || [ "$BASE_PORT" -gt 65535 ]; then
+    echo "错误: 端口号必须是1024-65535之间的数字"
+    exit 1
+fi
+
+# 验证端口范围
+if [ $((BASE_PORT + 3)) -gt 65535 ]; then
+    echo "错误: 基础端口号过大，无法分配连续的4个端口"
+    echo "当前配置将会使用以下端口:"
+    echo "- $BASE_PORT:  mongos路由服务"
+    echo "- $((BASE_PORT + 1)): config配置服务"
+    echo "- $((BASE_PORT + 2)): shard1分片服务"
+    echo "- $((BASE_PORT + 3)): shard2分片服务"
+    exit 1
+fi
+
+if [ -z "$MONGO_USERNAME" ] || [ -z "$MONGO_PASSWORD" ]; then
+    echo "错误: 用户名和密码不能为空"
+    exit 1
+fi
 
 # 端口配置
 MONGOS_PORT=$BASE_PORT
@@ -13,22 +98,87 @@ CONFIG_PORT=$((BASE_PORT + 1))
 SHARD1_PORT=$((BASE_PORT + 2))
 SHARD2_PORT=$((BASE_PORT + 3))
 
+# 显示端口使用信息
+echo "将使用以下端口:"
+echo "- $MONGOS_PORT:  mongos路由服务"
+echo "- $CONFIG_PORT: config配置服务"
+echo "- $SHARD1_PORT: shard1分片服务"
+echo "- $SHARD2_PORT: shard2分片服务"
+echo
+
+# 检查端口占用
+check_port() {
+    local port=$1
+    if command -v nc >/dev/null 2>&1; then
+        if nc -z localhost $port >/dev/null 2>&1; then
+            echo "错误: 端口 $port 已被占用"
+            exit 1
+        fi
+    elif command -v lsof >/dev/null 2>&1; then
+        if lsof -i :$port >/dev/null 2>&1; then
+            echo "错误: 端口 $port 已被占用"
+            exit 1
+        fi
+    fi
+}
+
+# 检查所需端口
+for port in $MONGOS_PORT $CONFIG_PORT $SHARD1_PORT $SHARD2_PORT; do
+    check_port $port
+done
+
 # 添加IP获取函数
 get_host_ip() {
+    # 如果手动指定了IP，直接使用
+    if [ ! -z "$MANUAL_HOST_IP" ]; then
+        # 验证IP格式
+        if [[ $MANUAL_HOST_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$MANUAL_HOST_IP"
+            return 0
+        else
+            echo "错误: 无效的IP地址格式: $MANUAL_HOST_IP" >&2
+            exit 1
+        fi
+    fi
+
     case "$(uname -s)" in
         Darwin)
-            # MacOS
-            host_ip=$(ipconfig getifaddr en0)
+            # MacOS - 尝试多个常见网络接口
+            for interface in en0 en1 en2 en3; do
+                host_ip=$(ipconfig getifaddr $interface 2>/dev/null)
+                if [ ! -z "$host_ip" ]; then
+                    echo $host_ip
+                    return 0
+                fi
+            done
+            # 如果上面都失败了，尝试使用 ifconfig
+            host_ip=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n 1)
             ;;
         Linux)
-            # Linux
-            host_ip=$(hostname -I | awk '{print $1}')
+            # Linux - 尝试多种方法
+            if command -v hostname >/dev/null 2>&1; then
+                host_ip=$(hostname -I | awk '{print $1}')
+            fi
+            
+            if [ -z "$host_ip" ]; then
+                host_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -n 1)
+            fi
+            
+            if [ -z "$host_ip" ]; then
+                host_ip=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n 1)
+            fi
             ;;
         *)
-            echo "不支持的操作系统"
+            echo "不支持的操作系统" >&2
             exit 1
             ;;
     esac
+
+    if [ -z "$host_ip" ]; then
+        echo "错误: 无法获取主机IP地址。请使用 --host-ip 参数手动指定IP地址。" >&2
+        exit 1
+    fi
+
     echo $host_ip
 }
 
@@ -44,8 +194,7 @@ chmod 400 ./${CLUSTER_NAME}/mongodb.key
 chown 999:999 ./${CLUSTER_NAME}/mongodb.key
 
 # 生成docker-compose.yml
-cat > ./${CLUSTER_NAME}/docker-compose.yml <<EOF
-version: '3.7'
+cat > ./${CLUSTER_NAME}/compose.yaml <<EOF
 networks:
   mongo_cluster_net:
     driver: bridge
@@ -132,7 +281,7 @@ EOF
 
 # 启动容器
 cd ${CLUSTER_NAME}
-docker-compose up -d
+docker compose up -d
 
 # 添加JSON解析函数
 parse_mongo_result() {

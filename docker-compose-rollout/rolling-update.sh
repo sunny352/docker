@@ -10,7 +10,7 @@
 #   3. 出现异常时自动回滚
 #
 # 使用要求：
-#   - 目标服务必须在 docker-compose.yml 中定义
+#   - 目标服务必须在 compose.yaml 中定义
 #   - 服务的镜像必须配置了 HEALTHCHECK
 #   - Docker Compose 需要支持 scale 功能
 #
@@ -27,7 +27,7 @@ set -e
 if [ -z "$1" ]; then
     echo "用法: $0 <服务名称>"
     echo "示例: $0 web-example"
-    echo "注意: 目标服务必须在 docker-compose.yml 中定义，且配置了健康检查"
+    echo "注意: 目标服务必须在 compose.yaml 中定义，且配置了健康检查"
     exit 1
 fi
 

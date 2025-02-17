@@ -9,8 +9,8 @@ RUNNER_TAGS="docker"
 # 创建必要的目录
 mkdir -p ./gitlab-runner/config
 
-# 创建 docker-compose 配置文件
-cat > ./docker-compose.yml << 'EOF'
+# 创建 docker compose 配置文件
+cat > ./compose.yaml << 'EOF'
 version: '3.7'
 services:
   gitlab-runner:
