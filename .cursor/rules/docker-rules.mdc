@@ -1,0 +1,94 @@
+---
+description: Docker 和 Docker Compose 使用规范
+globs: **/*.{yml,yaml}, **/Dockerfile
+---
+
+# Docker使用规范
+
+## 1. Docker Compose 版本规范
+
+- Compose 文件不需要指定 `version` 字段（现代 Docker Compose 自动使用最新格式）
+- 文件命名统一使用 `compose.yaml` 或 `compose.yml`（不再使用 docker-compose.yml）
+
+## 2. Dockerfile 规范
+
+- 基础镜像应当使用官方镜像，并指定具体版本号
+- 使用多阶段构建（Multi-stage builds）减小最终镜像大小
+- 合并 RUN 指令，减少镜像层数
+- 使用 .dockerignore 文件排除不需要的文件
+- 遵循最小权限原则，避免使用 root 用户运行应用
+
+## 3. Docker Compose 配置规范
+
+### 3.1 服务定义
+```yaml
+services:
+  web:
+    image: nginx:latest
+    container_name: web_app  # 指定容器名称
+    restart: unless-stopped  # 定义重启策略
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+```
+
+### 3.2 网络配置
+```yaml
+networks:
+  backend:
+    driver: bridge
+    name: backend_network
+```
+
+### 3.3 数据卷配置
+```yaml
+volumes:
+  db_data:
+    driver: local
+```
+
+## 4. 安全规范
+
+- 避免在镜像中存储敏感信息
+- 使用 `.env` 文件管理环境变量
+- 定期更新基础镜像以修复安全漏洞
+- 使用 secrets 管理敏感数据
+- 限制容器资源使用
+
+## 5. 最佳实践
+
+- 使用 healthcheck 确保服务健康状态
+- 合理设置日志轮转策略
+- 使用 docker-compose.yml 配置文件的 `depends_on` 管理服务依赖
+- 为容器设置资源限制（CPU、内存）
+- 使用 `docker compose down` 清理停止的容器和网络
+
+## 6. 开发环境配置
+
+- 使用 docker-compose.override.yml 覆盖生产环境配置
+- 开发环境启用调试端口和调试工具
+- 使用 volume 挂载源代码目录实现热重载
+
+## 7. 生产环境部署
+
+- 使用 Docker Compose 进行服务管理和部署
+- 实施监控和日志收集
+- 配置备份策略
+- 合理规划服务扩容方案
+- 使用 watchtower 等工具自动更新容器
+
+## 8. 命名规范
+
+- 容器名称：使用有意义的名称，遵循 `项目名_服务名` 格式
+- 镜像标签：使用语义化版本号
+- 网络名称：使用描述性名称，表明用途
+
+## 9. 文档要求
+
+- 每个项目必须包含 README.md，说明如何构建和运行
+- 记录所有环境变量的用途和默认值
+- 提供示例配置文件
+- 说明调试和故障排除方法
