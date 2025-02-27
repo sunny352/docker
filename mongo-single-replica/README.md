@@ -10,10 +10,36 @@
 
 ## 使用方式
 
-* 启动：运行start.sh，默认端口27017，集群名为rs0，可在start.sh中修改
-* 停止：运行stop.sh
+### 配置选项
+
+init.sh 支持以下参数：
+
+* `-p, --port PORT`: 设置端口号（默认：27017）
+* `-r, --replset NAME`: 设置副本集名称（默认：single-rs0）
+* `-u, --username USERNAME`: 设置MongoDB用户名（默认：root）
+* `-w, --password PASSWORD`: 设置MongoDB密码（默认：123456）
+* `--host-ip IP`: 手动指定主机IP（可选）
+* `-h, --help`: 显示帮助信息
+
+### 启动
+
+* 运行 init.sh，可以使用上述参数自定义配置，例如：
+  ```bash
+  ./init.sh --port 27018 --replset my-rs0
+  ```
 
 ## 说明
 
-* start.sh脚本会创建mongo的集群key文件、创建并启动docker compose集群并且初始化集群
-* stop.sh脚本会停止docker compose集群并删除相关容器和网络
+* init.sh 脚本会：
+  - 自动创建副本集所需的目录结构
+  - 创建mongo的集群key文件（如果不存在）
+  - 生成 docker-compose.yml 配置文件（如果不存在）
+  - 创建并启动docker compose集群
+  - 自动初始化副本集
+
+## 技术细节
+
+* 使用 MongoDB 5.0 及以上版本
+* 默认时区设置为 Asia/Shanghai
+* 自动配置副本集认证
+* 数据持久化存储在 ./mongo 目录
