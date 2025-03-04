@@ -344,17 +344,17 @@ wait_for_mongodb "${CLUSTER_NAME}_shard1"
 wait_for_mongodb "${CLUSTER_NAME}_shard2"
 
 # 修改Config Server就绪检测函数
-wait_for_config_server_ready() {
+wait_for_replica_ready() {
     local container=$1
     local max_attempts=30
     local attempt=1
     
-    echo "等待Config Server完全就绪..."
+    echo "等待节点完全就绪..."
     while [ $attempt -le $max_attempts ]; do
-        # 只检查副本集状态
+        # 检查副本集状态
         local rs_status=$(docker exec ${container} mongosh --quiet --eval "JSON.stringify(rs.status())")
         if [[ $rs_status == *"\"ok\":1"* ]] && [[ $rs_status == *"\"stateStr\":\"PRIMARY\""* ]]; then
-            echo "Config Server已完全就绪!"
+            echo "节点已完全就绪!"
             return 0
         fi
         echo "尝试 $attempt/$max_attempts ..."
@@ -362,7 +362,7 @@ wait_for_config_server_ready() {
         sleep 3
     done
     
-    echo "Config Server未能完全就绪!"
+    echo "节点未能完全就绪!"
     return 1
 }
 
@@ -379,7 +379,7 @@ echo "$CONFIG_INIT_CMD"
 docker exec ${CLUSTER_NAME}_configsvr mongosh --eval "$CONFIG_INIT_CMD"
 
 # 等待Config Server完全就绪
-if ! wait_for_config_server_ready "${CLUSTER_NAME}_configsvr"; then
+if ! wait_for_replica_ready "${CLUSTER_NAME}_configsvr"; then
     echo "Config Server初始化失败"
     exit 1
 fi
@@ -387,7 +387,7 @@ fi
 # 等待额外的时间确保副本集完全初始化
 sleep 5
 
-# 在Config Server上创建管理员用户（修改用户创建命令）
+# 在Config Server上创建管理员用户
 echo "在Config Server上创建管理员用户..."
 ADMIN_CREATE_CMD="try {
     const admin = db.getSiblingDB('admin');
@@ -401,7 +401,20 @@ ADMIN_CREATE_CMD="try {
             { role: 'readWriteAnyDatabase', db: 'admin' }
         ]
     });
-    print(JSON.stringify({ok:1,message:'User created successfully'}));
+    // 验证用户创建并测试权限
+    if(!admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}')) {
+        print(JSON.stringify({ok:0,error:'Auth failed'}));
+        quit(1);
+    }
+    // 测试写入权限
+    const testColl = admin.testauth;
+    const writeResult = testColl.insertOne({test: 1, timestamp: new Date()});
+    if(!writeResult.acknowledged) {
+        print(JSON.stringify({ok:0,error:'Write test failed'}));
+        quit(1);
+    }
+    testColl.drop();
+    print(JSON.stringify({ok:1,message:'User created and verified successfully'}));
 } catch(err) {
     print(JSON.stringify({ok:0,error:err.message}));
     quit(1);
@@ -412,73 +425,6 @@ echo "用户创建结果: $result"
 
 if [[ $result != *"\"ok\":1"* ]]; then
     echo "Config Server用户创建失败！"
-    exit 1
-fi
-
-echo "等待用户创建生效..."
-sleep 2
-
-# 验证用户创建（修改验证命令）
-echo "验证Config Server用户..."
-VERIFY_CMD="try {
-    const admin = db.getSiblingDB('admin');
-    const auth = admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}');
-    if(!auth) {
-        print(JSON.stringify({ok:0,authenticated:false,error:'Auth failed'}));
-        quit(1);
-    }
-    try {
-        const testColl = admin.testauth;
-        const writeResult = testColl.insertOne({test: 1, timestamp: new Date()});
-        if(writeResult.acknowledged) {
-            testColl.drop();
-            print(JSON.stringify({ok:1,authenticated:true,writeTest:'success'}));
-        } else {
-            print(JSON.stringify({ok:0,authenticated:true,writeTest:'failed'}));
-            quit(1);
-        }
-    } catch(err) {
-        print(JSON.stringify({ok:0,authenticated:true,writeError:err.message}));
-        quit(1);
-    }
-} catch(err) {
-    print(JSON.stringify({ok:0,error:err.message}));
-    quit(1);
-}"
-
-result=$(docker exec ${CLUSTER_NAME}_configsvr mongosh --quiet --eval "$VERIFY_CMD")
-echo "验证结果: $result"
-
-if [[ $result != *"\"ok\":1"* ]] || [[ $result != *"\"authenticated\":true"* ]]; then
-    echo "Config Server用户验证失败！"
-    echo "请检查日志："
-    docker exec ${CLUSTER_NAME}_configsvr mongosh --eval "db.adminCommand('getCmdLineOpts')"
-    docker logs ${CLUSTER_NAME}_configsvr
-    exit 1
-fi
-
-# 再次验证是否可以执行管理命令
-ADMIN_VERIFY_CMD="try {
-    const admin = db.getSiblingDB('admin');
-    if(!admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}')) {
-        print(JSON.stringify({ok:0,error:'Auth failed'}));
-        quit(1);
-    }
-    const status = admin.runCommand({serverStatus: 1});
-    if(status.ok !== 1) {
-        print(JSON.stringify({ok:0,error:'Failed to get server status'}));
-        quit(1);
-    }
-    print(JSON.stringify({ok:1,adminCommand:'success'}));
-} catch(err) {
-    print(JSON.stringify({ok:0,error:err.message}));
-    quit(1);
-}"
-
-result=$(docker exec ${CLUSTER_NAME}_configsvr mongosh --quiet --eval "$ADMIN_VERIFY_CMD")
-if [[ $result != *"\"ok\":1"* ]]; then
-    echo "Config Server管理命令验证失败！"
-    echo "验证结果: $result"
     exit 1
 fi
 
@@ -507,82 +453,8 @@ echo "$SHARD2_INIT_CMD"
 docker exec ${CLUSTER_NAME}_shard2 mongosh --eval "$SHARD2_INIT_CMD"
 
 # 等待分片副本集初始化
-wait_for_primary "${CLUSTER_NAME}_shard1"
-wait_for_primary "${CLUSTER_NAME}_shard2"
-
-
-# 添加用户创建函数
-create_admin_user() {
-    local container=$1
-    local max_attempts=3
-    local attempt=1
-    
-    echo "在 ${container} 上创建管理员用户..."
-    while [ $attempt -le $max_attempts ]; do
-        local create_cmd="try {
-            const admin = db.getSiblingDB('admin');
-            admin.createUser({
-                user: '${MONGO_USERNAME}',
-                pwd: '${MONGO_PASSWORD}',
-                roles: [
-                    { role: 'root', db: 'admin' },
-                    { role: 'userAdminAnyDatabase', db: 'admin' },
-                    { role: 'clusterAdmin', db: 'admin' },
-                    { role: 'readWriteAnyDatabase', db: 'admin' }
-                ]
-            });
-            print(JSON.stringify({ok:1,message:'User created successfully'}));
-        } catch(err) {
-            print(JSON.stringify({ok:0,error:err.message}));
-            quit(1);
-        }"
-        
-        local result=$(docker exec ${container} mongosh --quiet --eval "$create_cmd")
-        echo "用户创建结果: $result"
-        
-        if [[ $result == *"\"ok\":1"* ]]; then
-            # 验证用户创建
-            local verify_cmd="try {
-                const admin = db.getSiblingDB('admin');
-                const auth = admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}');
-                if(auth) {
-                    print(JSON.stringify({ok:1,authenticated:true}));
-                } else {
-                    print(JSON.stringify({ok:0,authenticated:false}));
-                    quit(1);
-                }
-            } catch(err) {
-                print(JSON.stringify({ok:0,error:err.message}));
-                quit(1);
-            }"
-            
-            local verify_result=$(docker exec ${container} mongosh --quiet --eval "$verify_cmd")
-            if [[ $verify_result == *"\"ok\":1"* ]] && [[ $verify_result == *"\"authenticated\":true"* ]]; then
-                echo "${container} 用户创建和验证成功"
-                return 0
-            fi
-        fi
-        
-        echo "尝试 $attempt/$max_attempts ..."
-        attempt=$((attempt + 1))
-        sleep 2
-    done
-    
-    echo "${container} 创建管理员用户失败"
-    return 1
-}
-
-
-# 在分片上创建用户并验证
-for shard in "shard1" "shard2"; do
-    if ! create_admin_user "${CLUSTER_NAME}_${shard}"; then
-        echo "${shard} 用户创建失败"
-        exit 1
-    fi
-done
-
-# 等待 mongos 就绪
-wait_for_mongodb "${CLUSTER_NAME}_mongos"
+wait_for_replica_ready "${CLUSTER_NAME}_shard1"
+wait_for_replica_ready "${CLUSTER_NAME}_shard2"
 
 # 直接使用Config Server的管理员账户通过mongos添加分片
 ADD_SHARDS_CMD="try {
@@ -593,7 +465,9 @@ ADD_SHARDS_CMD="try {
     }
     const result1 = sh.addShard('${CLUSTER_NAME}_shard1rs/${HOST_IP}:${SHARD1_PORT}');
     const result2 = sh.addShard('${CLUSTER_NAME}_shard2rs/${HOST_IP}:${SHARD2_PORT}');
-    print(JSON.stringify({ok:1,shard1:result1,shard2:result2}));
+    // 直接在这里检查集群状态
+    const status = sh.status();
+    print(JSON.stringify({ok:1,shard1:result1,shard2:result2,status:status}));
 } catch(err) {
     print(JSON.stringify({ok:0,error:err.message}));
     quit(1);
@@ -609,53 +483,26 @@ if [[ $result != *"\"ok\":1"* ]]; then
     exit 1
 fi
 
-# 验证集群状态
-CHECK_STATUS_CMD="try {
+# 验证最终的管理员用户状态
+FINAL_VERIFY_CMD="try {
     const admin = db.getSiblingDB('admin');
     if(!admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}')) {
         print(JSON.stringify({ok:0,error:'Auth failed'}));
         quit(1);
     }
-    const status = sh.status();
-    print(JSON.stringify({ok:1,status:status}));
-} catch(err) {
-    print(JSON.stringify({ok:0,error:err.message}));
-    quit(1);
-}"
-echo "正在执行验证集群状态命令："
-result=$(docker exec ${CLUSTER_NAME}_mongos mongosh --quiet --eval "$CHECK_STATUS_CMD")
-echo "集群状态验证结果: $result"
-
-# 修改验证用户创建部分的判断逻辑
-VERIFY_ADMIN_CMD="try {
-    const admin = db.getSiblingDB('admin');
-    if(!admin.auth('${MONGO_USERNAME}', '${MONGO_PASSWORD}')) {
-        print(JSON.stringify({ok:0,error:'Auth failed'}));
-        quit(1);
-    }
-    const status = db.runCommand({connectionStatus: 1});
-    print(JSON.stringify({ok:1,status:status}));
+    print(JSON.stringify({ok:1,authenticated:true}));
 } catch(err) {
     print(JSON.stringify({ok:0,error:err.message}));
     quit(1);
 }"
 
-echo "验证管理员用户..."
-result=$(docker exec ${CLUSTER_NAME}_mongos mongosh --quiet --eval "$VERIFY_ADMIN_CMD")
-echo "验证结果: $result"
+echo "验证最终管理员用户状态..."
+result=$(docker exec ${CLUSTER_NAME}_mongos mongosh --quiet --eval "$FINAL_VERIFY_CMD")
 
-# 修改判断条件：检查是否有认证用户
-if [[ $result == *"\"ok\":1"* ]] && [[ $result == *"\"authenticatedUsers\""* ]]; then
-    # 检查是否包含admin用户
-    if [[ $result == *"\"user\":\"${MONGO_USERNAME}\""* ]] && [[ $result == *"\"db\":\"admin\""* ]]; then
-        echo "管理员用户验证成功！"
-        echo "验证状态: 已认证用户列表中包含 ${MONGO_USERNAME}@admin"
-    else
-        echo "管理员用户验证失败！未找到${MONGO_USERNAME}用户"
-        exit 1
-    fi
+if [[ $result == *"\"ok\":1"* ]] && [[ $result == *"\"authenticated\":true"* ]]; then
+    echo "管理员用户最终验证成功！"
 else
-    echo "管理员用户验证失败！"
+    echo "管理员用户最终验证失败！"
     echo "验证结果: $result"
     exit 1
 fi
