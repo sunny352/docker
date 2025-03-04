@@ -8,4 +8,4 @@
 
 ## [Docker Compose 滚动更新脚本](./docker-compose-rollout/README.md)
 
-## [Redis集群](./redis-shard-replica/README.md)
+## [Redis分片集群](./redis-shard-replica/README.md)
