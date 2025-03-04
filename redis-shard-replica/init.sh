@@ -187,9 +187,9 @@ for ((i=0; i<SHARDS; i++)); do
       --cluster-node-timeout 5000
       --appendonly yes
       --bind 0.0.0.0
-      --cluster-announce-ip redis-node-${i}
-      --cluster-announce-port 6379
-      --cluster-announce-bus-port 16379
+      --cluster-announce-ip ${HOST_IP}
+      --cluster-announce-port ${MASTER_PORT}
+      --cluster-announce-bus-port $((MASTER_PORT + 10000))
     ports:
       - "${MASTER_PORT}:6379"
       - "$((MASTER_PORT + 10000)):16379"
@@ -217,9 +217,9 @@ EOF
       --cluster-node-timeout 5000
       --appendonly yes
       --bind 0.0.0.0
-      --cluster-announce-ip redis-replica-${i}-${j}
-      --cluster-announce-port 6379
-      --cluster-announce-bus-port 16379
+      --cluster-announce-ip ${HOST_IP}
+      --cluster-announce-port ${REPLICA_PORT}
+      --cluster-announce-bus-port $((REPLICA_PORT + 10000))
     ports:
       - "${REPLICA_PORT}:6379"
       - "$((REPLICA_PORT + 10000)):16379"
