@@ -512,13 +512,13 @@ echo "MongoDB分片集群部署完成！"
 echo "==================================="
 echo "连接说明："
 echo "1. 如果已安装mongosh客户端，可以使用以下命令连接："
-echo "mongosh \"mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin\""
+echo "mongosh \"mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1\""
 echo ""
 echo "2. 如果使用MongoDB Compass图形界面工具连接，使用以下连接串："
-echo "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin"
+echo "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority"
 echo ""
 echo "3. 如果从其他应用程序连接，使用以下连接串："
-echo "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&directConnection=true"
+echo "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority&maxPoolSize=50&minPoolSize=10&maxIdleTimeMS=30000&connectTimeoutMS=10000"
 echo ""
 echo "注意事项："
 echo "1. 如果从其他机器连接，请将 ${HOST_IP} 替换为服务器的实际可访问IP地址"
@@ -530,5 +530,250 @@ echo "4. 如果需要安装mongosh客户端："
 echo "   - MacOS: brew install mongosh"
 echo "   - Linux: 参考 https://www.mongodb.com/docs/mongodb-shell/install/"
 echo "   - 或使用Docker临时测试连接："
-echo "     docker run --rm -it mongo:${MONGO_VERSION} mongosh \"mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin\""
+echo "     docker run --rm -it mongo:${MONGO_VERSION} mongosh \"mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1\""
 echo "==================================="
+
+# 生成集群信息和使用说明
+cat > README.md <<EOF
+# MongoDB分片集群使用说明
+
+## 集群信息
+- 集群名称: ${CLUSTER_NAME}
+- MongoDB版本: ${MONGO_VERSION}
+- 用户名: ${MONGO_USERNAME}
+- 密码: ${MONGO_PASSWORD}
+
+## 节点信息
+- Mongos路由服务: ${HOST_IP}:${MONGOS_PORT}
+- Config配置服务: ${HOST_IP}:${CONFIG_PORT}
+- Shard1分片服务: ${HOST_IP}:${SHARD1_PORT}
+- Shard2分片服务: ${HOST_IP}:${SHARD2_PORT}
+
+## 连接方式
+
+### 1. 使用mongosh命令行工具
+\`\`\`bash
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1"
+\`\`\`
+
+### 2. 使用MongoDB Compass图形界面工具
+连接串：
+\`\`\`
+mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority
+\`\`\`
+
+### 3. 应用程序连接
+标准连接串（推荐）：
+\`\`\`
+mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority
+\`\`\`
+
+高可用连接串（生产环境推荐）：
+\`\`\`
+mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority&maxPoolSize=50&minPoolSize=10&maxIdleTimeMS=30000&connectTimeoutMS=10000&serverSelectionTimeoutMS=5000&socketTimeoutMS=45000&waitQueueTimeoutMS=5000&heartbeatFrequencyMS=10000
+\`\`\`
+
+### 连接参数说明
+- \`authSource=admin\`: 指定认证数据库
+- \`authMechanism=SCRAM-SHA-1\`: 指定认证机制
+- \`readPreference=primary\`: 优先从主节点读取数据
+- \`retryWrites=true\`: 启用写操作重试
+- \`w=majority\`: 写操作需要大多数节点确认
+- \`maxPoolSize=50\`: 连接池最大连接数
+- \`minPoolSize=10\`: 连接池最小连接数
+- \`maxIdleTimeMS=30000\`: 连接最大空闲时间
+- \`connectTimeoutMS=10000\`: 连接超时时间
+- \`serverSelectionTimeoutMS=5000\`: 服务器选择超时时间
+- \`socketTimeoutMS=45000\`: Socket超时时间
+- \`waitQueueTimeoutMS=5000\`: 等待队列超时时间
+- \`heartbeatFrequencyMS=10000\`: 心跳检测频率
+
+## 代码示例
+
+### Python (pymongo)
+\`\`\`python
+from pymongo import MongoClient
+
+uri = "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority"
+client = MongoClient(uri, 
+    maxPoolSize=50,
+    minPoolSize=10,
+    maxIdleTimeMS=30000,
+    connectTimeoutMS=10000,
+    serverSelectionTimeoutMS=5000,
+    socketTimeoutMS=45000,
+    waitQueueTimeoutMS=5000,
+    heartbeatFrequencyMS=10000
+)
+db = client.your_database
+\`\`\`
+
+### Node.js (mongodb)
+\`\`\`javascript
+const { MongoClient } = require('mongodb');
+
+const uri = "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority";
+const client = new MongoClient(uri, {
+    maxPoolSize: 50,
+    minPoolSize: 10,
+    maxIdleTimeMS: 30000,
+    connectTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    waitQueueTimeoutMS: 5000,
+    heartbeatFrequencyMS: 10000
+});
+await client.connect();
+const db = client.db('your_database');
+\`\`\`
+
+### Java (mongodb-driver-sync)
+\`\`\`java
+import com.mongodb.MongoClientSettings;
+import com.mongodb.ConnectionString;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+
+String uri = "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority";
+MongoClientSettings settings = MongoClientSettings.builder()
+    .applyConnectionString(new ConnectionString(uri))
+    .applyToConnectionPoolSettings(builder -> 
+        builder.maxSize(50)
+               .minSize(10)
+               .maxConnectionIdleTime(30000, TimeUnit.MILLISECONDS)
+    )
+    .applyToSocketSettings(builder ->
+        builder.connectTimeout(10000, TimeUnit.MILLISECONDS)
+               .readTimeout(45000, TimeUnit.MILLISECONDS)
+    )
+    .applyToServerSettings(builder ->
+        builder.heartbeatFrequency(10000, TimeUnit.MILLISECONDS)
+    )
+    .build();
+MongoClient mongoClient = MongoClients.create(settings);
+MongoDatabase database = mongoClient.getDatabase("your_database");
+\`\`\`
+
+### Go (mongo-driver)
+\`\`\`go
+import (
+    "context"
+    "time"
+    "go.mongodb.org/mongo-driver/mongo"
+    "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+uri := "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority"
+opts := options.Client().
+    ApplyURI(uri).
+    SetMaxPoolSize(50).
+    SetMinPoolSize(10).
+    SetMaxConnIdleTime(30 * time.Second).
+    SetConnectTimeout(10 * time.Second).
+    SetServerSelectionTimeout(5 * time.Second).
+    SetSocketTimeout(45 * time.Second)
+
+client, err := mongo.Connect(context.TODO(), opts)
+db := client.Database("your_database")
+\`\`\`
+
+## 常用管理命令
+
+### 1. 查看集群状态
+\`\`\`bash
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --eval "sh.status()"
+\`\`\`
+
+### 2. 查看数据库列表
+\`\`\`bash
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --eval "show dbs"
+\`\`\`
+
+### 3. 为集合启用分片
+\`\`\`bash
+# 首先对数据库启用分片
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --eval 'sh.enableSharding("your_database")'
+
+# 然后对集合启用分片（示例使用_id作为片键）
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --eval 'sh.shardCollection("your_database.your_collection", {_id: "hashed"})'
+\`\`\`
+
+### 4. 查看集群配置
+\`\`\`bash
+mongosh "mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --eval "db.getSiblingDB('config').settings.find()"
+\`\`\`
+
+## 注意事项
+1. 如果从其他机器连接，请将 ${HOST_IP} 替换为服务器的实际可访问IP地址
+2. 确保防火墙已开放所需端口（${MONGOS_PORT}-$((MONGOS_PORT+3))）
+3. 建议在生产环境中修改默认密码
+4. 分片集群的所有操作都应该通过mongos路由进行
+5. 建议使用支持MongoDB分片集群的驱动程序版本
+
+## 管理命令
+
+### 启动集群
+\`\`\`bash
+cd ${CLUSTER_NAME}
+docker compose up -d
+\`\`\`
+
+### 停止集群
+\`\`\`bash
+cd ${CLUSTER_NAME}
+docker compose down
+\`\`\`
+
+### 查看日志
+\`\`\`bash
+cd ${CLUSTER_NAME}
+docker compose logs -f
+\`\`\`
+
+### 重启集群
+\`\`\`bash
+cd ${CLUSTER_NAME}
+docker compose restart
+\`\`\`
+
+## 故障排查
+1. 如果连接失败，请检查：
+   - 用户名密码是否正确
+   - IP地址和端口是否可访问
+   - 防火墙是否开放端口
+   - 集群服务是否正常运行
+
+2. 如果分片不均衡，可以：
+   - 检查片键选择是否合适
+   - 运行手动平衡命令
+   - 调整平衡器配置
+
+3. 如果性能问题，建议：
+   - 检查索引使用情况
+   - 优化查询语句
+   - 监控各分片负载
+   - 考虑添加更多分片
+
+## 备份和恢复
+1. 备份整个集群：
+\`\`\`bash
+mongodump --uri="mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" --out=/backup/$(date +%Y%m%d)
+\`\`\`
+
+2. 恢复备份：
+\`\`\`bash
+mongorestore --uri="mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@${HOST_IP}:${MONGOS_PORT}/admin?authSource=admin" /backup/20240101
+\`\`\`
+
+## 监控建议
+1. 定期检查集群状态
+2. 监控各节点资源使用
+3. 设置适当的告警阈值
+4. 保持日志定期归档
+5. 建立备份恢复机制
+
+祝您使用愉快！
+EOF
+
+echo "集群信息和使用说明已保存到 README.md"

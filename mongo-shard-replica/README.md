@@ -52,20 +52,48 @@ sudo ./init.sh --host-ip 192.168.1.100
 sudo ./init.sh -n my-cluster -p 27020 -v 6.0 -u admin -w mypassword --host-ip 192.168.1.100
 ```
 
-### 3. 连接MongoDB集群
-初始化完成后，脚本会显示详细的连接信息。以下是连接方式示例：
+### 3. 查看集群连接信息
+脚本执行完成后会：
 
-- 使用mongosh客户端连接：
+1. 在终端显示连接信息
+2. 在集群目录下生成一个详细的 README.md 文件，包含：
+   - 集群基本信息（名称、版本、认证信息）
+   - 节点信息（各个服务的地址和端口）
+   - 多种连接方式的详细说明
+   - 各种编程语言的代码示例（Python、Node.js、Java、Go）
+   - 常用管理命令
+   - 集群管理指南
+   - 故障排查指南
+   - 备份恢复方法
+   - 监控建议
+
+生成的连接信息包括：
+
+1. mongosh命令行连接串（带认证机制）：
 ```bash
-mongosh "mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin"
+mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMechanism=SCRAM-SHA-1
 ```
-- 使用MongoDB Compass连接：
+
+2. MongoDB Compass连接串（带高可用配置）：
 ```bash
-mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin
+mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority
 ```
-- 从其他应用程序连接：
+
+3. 应用程序连接串（带完整参数）：
 ```bash
-mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&directConnection=true
+mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMechanism=SCRAM-SHA-1&readPreference=primary&retryWrites=true&w=majority&maxPoolSize=50&minPoolSize=10&maxIdleTimeMS=30000&connectTimeoutMS=10000&serverSelectionTimeoutMS=5000&socketTimeoutMS=45000&waitQueueTimeoutMS=5000&heartbeatFrequencyMS=10000
+```
+
+### 4. 目录结构
+初始化完成后，会在指定的集群名称目录下创建以下文件和目录：
+```
+<cluster-name>/
+├── compose.yaml          # Docker Compose 配置文件
+├── mongodb.key          # MongoDB 认证密钥文件
+├── README.md           # 集群信息和使用说明
+├── configsvr/          # Config Server 数据目录
+├── shard1/            # Shard1 数据目录
+└── shard2/            # Shard2 数据目录
 ```
 
 ### 注意事项
@@ -80,18 +108,7 @@ nc -zv <host-ip> <port>
    - Linux: 参考 [MongoDB Shell 安装文档](https://www.mongodb.com/docs/mongodb-shell/install/)
    - 或使用Docker临时测试连接：
 ```bash
-docker run --rm -it mongo:<version> mongosh "mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin"
-```
-
-### 目录结构
-初始化完成后，会在指定的集群名称目录下创建以下文件和目录：
-```
-<cluster-name>/
-├── compose.yaml          # Docker Compose 配置文件
-├── mongodb.key          # MongoDB 认证密钥文件
-├── configsvr/          # Config Server 数据目录
-├── shard1/            # Shard1 数据目录
-└── shard2/            # Shard2 数据目录
+docker run --rm -it mongo:<version> mongosh "mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMechanism=SCRAM-SHA-1"
 ```
 
 ### 常见问题
