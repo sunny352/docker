@@ -129,13 +129,17 @@ echo "Controller端口: $CONTROLLER_PORT"
 echo "服务名称: $KAFKA_NAME"
 
 # 创建必要的目录
-mkdir -p ./${KAFKA_NAME}/{kafka-data,kafka-config}
+mkdir -p ./${KAFKA_NAME}/{data,config}
+
+# 设置目录权限
+chmod 777 ./${KAFKA_NAME}/data
+chmod 777 ./${KAFKA_NAME}/config
 
 # 生成集群ID
 CLUSTER_ID=$(od -x -N 4 /dev/urandom | head -1 | awk '{print $2}')
 
 # 创建 JAAS 配置文件
-cat > ./${KAFKA_NAME}/kafka-config/kafka_jaas.conf << EOL
+cat > ./${KAFKA_NAME}/config/kafka_jaas.conf << EOL
 KafkaServer {
     org.apache.kafka.common.security.plain.PlainLoginModule required
     username="${KAFKA_USERNAME}"
@@ -176,10 +180,10 @@ services:
       - KAFKA_CFG_SASL_ENABLED_MECHANISMS=PLAIN
       - KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
       - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_OPTS=-Djava.security.auth.login.config=/opt/bitnami/kafka/config/kafka_jaas.conf
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/bitnami/kafka/config/kafka_jaas.conf
     volumes:
-      - ./kafka-data:/bitnami/kafka
-      - ./kafka-config/kafka_jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf
+      - ./data:/bitnami/kafka/data
+      - ./config:/bitnami/kafka/config
 EOL
 
 # 启动docker compose
@@ -200,6 +204,10 @@ while [ $attempt -le $max_attempts ]; do
         echo "等待容器启动..."
         sleep 2
         attempt=$((attempt + 1))
+        if [ $attempt -gt $max_attempts ]; then
+            echo "Kafka启动超时!"
+            exit 1
+        fi
         continue
     fi
     
@@ -211,12 +219,11 @@ while [ $attempt -le $max_attempts ]; do
     
     echo "尝试 $attempt/$max_attempts ..."
     attempt=$((attempt + 1))
-    sleep 2
-    
     if [ $attempt -gt $max_attempts ]; then
         echo "Kafka启动超时!"
         exit 1
     fi
+    sleep 2
 done
 
 echo "Kafka集群已成功启动!"
@@ -362,8 +369,8 @@ func consumeMessages(consumer sarama.Consumer) {
 \`\`\`
 ./${KAFKA_NAME}/
 ├── docker-compose.yml    # Docker Compose 配置文件
-├── kafka-data/          # Kafka 数据目录
-└── kafka-config/        # Kafka 配置目录
+├── data/                # Kafka 数据目录
+└── config/             # Kafka 配置目录
 \`\`\`
 
 ## 常用命令示例
@@ -377,7 +384,7 @@ docker exec ${KAFKA_NAME}-kafka kafka-topics.sh \\
   --bootstrap-server localhost:9092 \\
   --partitions 3 \\
   --replication-factor 1 \\
-  --command-config /opt/bitnami/kafka/config/producer.properties
+  --command-config /bitnami/kafka/config/producer.properties
 \`\`\`
 
 2. 查看主题列表
@@ -385,7 +392,7 @@ docker exec ${KAFKA_NAME}-kafka kafka-topics.sh \\
 docker exec ${KAFKA_NAME}-kafka kafka-topics.sh \\
   --list \\
   --bootstrap-server localhost:9092 \\
-  --command-config /opt/bitnami/kafka/config/producer.properties
+  --command-config /bitnami/kafka/config/producer.properties
 \`\`\`
 
 3. 查看主题详情
@@ -394,7 +401,7 @@ docker exec ${KAFKA_NAME}-kafka kafka-topics.sh \\
   --describe \\
   --topic my-topic \\
   --bootstrap-server localhost:9092 \\
-  --command-config /opt/bitnami/kafka/config/producer.properties
+  --command-config /bitnami/kafka/config/producer.properties
 \`\`\`
 
 ### 消息操作
@@ -403,7 +410,7 @@ docker exec ${KAFKA_NAME}-kafka kafka-topics.sh \\
 docker exec -it ${KAFKA_NAME}-kafka kafka-console-producer.sh \\
   --topic my-topic \\
   --bootstrap-server localhost:9092 \\
-  --producer.config /opt/bitnami/kafka/config/producer.properties
+  --producer.config /bitnami/kafka/config/producer.properties
 \`\`\`
 
 2. 消费消息
@@ -412,7 +419,7 @@ docker exec -it ${KAFKA_NAME}-kafka kafka-console-consumer.sh \\
   --topic my-topic \\
   --from-beginning \\
   --bootstrap-server localhost:9092 \\
-  --consumer.config /opt/bitnami/kafka/config/consumer.properties
+  --consumer.config /bitnami/kafka/config/consumer.properties
 \`\`\`
 
 ### 服务管理
@@ -435,7 +442,7 @@ cd ./${KAFKA_NAME} && docker compose logs -f
 1. 本部署使用 KRaft 模式，不需要 ZooKeeper
 2. 外部客户端连接请使用 \`${HOST_IP}:${KAFKA_PORT}\`
 3. 容器内部连接请使用 \`localhost:9092\`
-4. 数据持久化在 \`./${KAFKA_NAME}/kafka-data\` 目录
+4. 数据持久化在 \`./${KAFKA_NAME}/data\` 目录
 
 ## 常见问题
 1. 如果遇到连接问题，请检查：
@@ -443,9 +450,8 @@ cd ./${KAFKA_NAME} && docker compose logs -f
    - 是否使用了正确的连接地址
 2. 如果需要重置数据：
    - 停止服务：\`docker compose down\`
-   - 删除数据目录：\`rm -rf kafka-data\`
+   - 删除数据目录：\`rm -rf data\`
    - 重新启动：\`docker compose up -d\`
-
 ## 参考资料
 - [Kafka 官方文档](https://kafka.apache.org/documentation/)
 - [Bitnami Kafka Docker 镜像文档](https://hub.docker.com/r/bitnami/kafka)
@@ -459,3 +465,4 @@ echo "$README_CONTENT" | tee README.md
 echo "=========================================================="
 echo "说明文档已生成到 README.md"
 echo "=========================================================="
+
