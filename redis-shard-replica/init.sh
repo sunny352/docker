@@ -5,8 +5,10 @@ DEFAULT_CLUSTER_NAME="redis-cluster1"
 DEFAULT_BASE_PORT=6379
 DEFAULT_REDIS_VERSION="7.2"
 DEFAULT_REDIS_PASSWORD="123456"
-DEFAULT_SHARDS=3
-DEFAULT_REPLICAS=1
+DEFAULT_SHARDS=2
+DEFAULT_REPLICAS=0
+DEFAULT_CPU_LIMIT="0.5"
+DEFAULT_MEMORY_LIMIT="512M"
 
 # 帮助信息
 show_usage() {
@@ -18,8 +20,10 @@ show_usage() {
     echo "  -v, --version VERSION     设置Redis版本 (默认: ${DEFAULT_REDIS_VERSION})"
     echo "  -w, --password PASSWORD   设置Redis密码 (默认: ${DEFAULT_REDIS_PASSWORD})"
     echo "  -s, --shards SHARDS      设置分片数量 (默认: ${DEFAULT_SHARDS})"
-    echo "  -r, --replicas REPLICAS  设置每个分片的副本数 (默认: ${DEFAULT_REPLICAS})"
+    echo "  -r, --replicas REPLICAS  设置每个分片的副本数 (默认: ${DEFAULT_REPLICAS}，0表示无副本)"
     echo "  --host-ip IP              手动指定主机IP (可选)"
+    echo "  --cpu CPU                设置CPU限制 (默认: ${DEFAULT_CPU_LIMIT})"
+    echo "  --memory MEM             设置内存限制 (默认: ${DEFAULT_MEMORY_LIMIT})"
     exit 1
 }
 
@@ -57,6 +61,14 @@ while [[ $# -gt 0 ]]; do
             MANUAL_HOST_IP="$2"
             shift 2
             ;;
+        --cpu)
+            CPU_LIMIT="$2"
+            shift 2
+            ;;
+        --memory)
+            MEMORY_LIMIT="$2"
+            shift 2
+            ;;
         *)
             echo "错误: 未知参数 $1"
             show_usage
@@ -71,6 +83,8 @@ REDIS_VERSION=${REDIS_VERSION:-$DEFAULT_REDIS_VERSION}
 REDIS_PASSWORD=${REDIS_PASSWORD:-$DEFAULT_REDIS_PASSWORD}
 SHARDS=${SHARDS:-$DEFAULT_SHARDS}
 REPLICAS=${REPLICAS:-$DEFAULT_REPLICAS}
+CPU_LIMIT=${CPU_LIMIT:-$DEFAULT_CPU_LIMIT}
+MEMORY_LIMIT=${MEMORY_LIMIT:-$DEFAULT_MEMORY_LIMIT}
 
 # 验证必要参数
 if ! [[ "$BASE_PORT" =~ ^[0-9]+$ ]] || [ "$BASE_PORT" -lt 1024 ] || [ "$BASE_PORT" -gt 65535 ]; then
@@ -162,11 +176,12 @@ HOST_IP=$(get_host_ip)
 # 创建集群目录
 mkdir -p ./${CLUSTER_NAME}
 
-# 生成docker-compose.yml
+# 生成compose.yml
 cat > ./${CLUSTER_NAME}/compose.yaml <<EOF
 networks:
   redis_cluster_net:
     driver: bridge
+    name: ${CLUSTER_NAME}_network
 
 services:
 EOF
@@ -199,6 +214,17 @@ for ((i=0; i<SHARDS; i++)); do
       redis_cluster_net:
         aliases:
           - redis-node-${i}
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT}'
+          memory: ${MEMORY_LIMIT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 EOF
 
@@ -229,6 +255,17 @@ EOF
       redis_cluster_net:
         aliases:
           - redis-replica-${i}-${j}
+    deploy:
+      resources:
+        limits:
+          cpus: '${CPU_LIMIT}'
+          memory: ${MEMORY_LIMIT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 EOF
     done
@@ -238,14 +275,14 @@ echo "开始部署Redis集群..."
 
 # 创建并启动容器
 cd ${CLUSTER_NAME}
-docker-compose up -d
+docker compose up -d
 
 # 等待容器启动
 echo "等待容器启动..."
 sleep 10
 
 # 检查容器状态
-CONTAINERS=$(docker-compose ps -q)
+CONTAINERS=$(docker compose ps -q)
 for container in $CONTAINERS; do
     status=$(docker inspect -f '{{.State.Status}}' $container)
     if [ "$status" != "running" ]; then
@@ -293,18 +330,36 @@ generate_info() {
 - 集群名称: ${CLUSTER_NAME}
 - Redis版本: ${REDIS_VERSION}
 - 分片数量: ${SHARDS}
-- 每个分片的副本数: ${REPLICAS}
+- 副本配置: ${REPLICAS} 个副本/分片$([ ${REPLICAS} -eq 0 ] && echo " (无副本模式)")
 - 总节点数: ${TOTAL_NODES}
-- 可用端口: ${BASE_PORT} - $((BASE_PORT + TOTAL_NODES - 1))
+- 资源限制: 
+  - CPU: ${CPU_LIMIT} 核
+  - 内存: ${MEMORY_LIMIT}
+- 端口范围: ${BASE_PORT} - $((BASE_PORT + TOTAL_NODES - 1))
 - Redis密码: ${REDIS_PASSWORD}
+
+## 节点分布
+### 主节点
+$(for ((i=0; i<SHARDS; i++)); do
+    echo "- 分片 ${i}: ${HOST_IP}:$((BASE_PORT + i))"
+done)
+
+$(if [ ${REPLICAS} -gt 0 ]; then
+echo "### 副本节点"
+for ((i=0; i<SHARDS; i++)); do
+    for ((j=0; j<REPLICAS; j++)); do
+        echo "- 分片 ${i} 的副本 ${j}: ${HOST_IP}:$((BASE_PORT + i + (j+1)*SHARDS))"
+    done
+done
+fi)
 
 ## 连接方式
 
 ### 1. 命令行连接
 
-#### 单节点方式连接(任选其一):
-$(for ((i=0; i<TOTAL_NODES; i++)); do
-    echo "- \`redis-cli -h ${HOST_IP} -p $((BASE_PORT + i)) -a ${REDIS_PASSWORD}\`"
+#### 单节点方式连接:
+$(for ((i=0; i<SHARDS; i++)); do
+    echo "- 连接分片 ${i}: \`redis-cli -h ${HOST_IP} -p $((BASE_PORT + i)) -a ${REDIS_PASSWORD}\`"
 done)
 
 #### 集群方式连接(推荐):
@@ -321,21 +376,19 @@ redis://:${REDIS_PASSWORD}@${NODES}
 
 #### Java (Lettuce):
 \`\`\`java
-List<RedisURI> nodes = Arrays.asList(
-$(for ((i=0; i<TOTAL_NODES; i++)); do
-    echo "    RedisURI.builder().withHost(\"${HOST_IP}\").withPort($((BASE_PORT + i))).withPassword(\"${REDIS_PASSWORD}\").build()$([ $i -lt $((TOTAL_NODES-1)) ] && echo ",")"
-done)
-);
-RedisClusterClient.create(nodes)
+RedisClusterClient.create(RedisURI.Builder
+    .redis("${HOST_IP}", ${BASE_PORT})
+    .withPassword("${REDIS_PASSWORD}")
+    .build());
 \`\`\`
 
 #### Python (redis-py):
 \`\`\`python
-redis.RedisCluster(
+from redis.cluster import RedisCluster
+
+redis_cluster = RedisCluster(
     startup_nodes=[
-$(for ((i=0; i<TOTAL_NODES; i++)); do
-    echo "        {\"host\": \"${HOST_IP}\", \"port\": $((BASE_PORT + i))}$([ $i -lt $((TOTAL_NODES-1)) ] && echo ",")"
-done)
+        {"host": "${HOST_IP}", "port": ${BASE_PORT}}
     ],
     password="${REDIS_PASSWORD}",
     decode_responses=True
@@ -344,33 +397,36 @@ done)
 
 #### Node.js (ioredis):
 \`\`\`javascript
-new Redis.Cluster([
-$(for ((i=0; i<TOTAL_NODES; i++)); do
-    echo "    {host: \"${HOST_IP}\", port: $((BASE_PORT + i))}$([ $i -lt $((TOTAL_NODES-1)) ] && echo ",")"
-done)
+const Redis = require('ioredis');
+
+const cluster = new Redis.Cluster([
+    { host: '${HOST_IP}', port: ${BASE_PORT} }
 ], {
-    redisOptions: {password: "${REDIS_PASSWORD}"}
-})
+    redisOptions: { password: '${REDIS_PASSWORD}' }
+});
 \`\`\`
 
 #### Go (go-redis):
 \`\`\`go
-redis.NewClusterClient(&redis.ClusterOptions{
-    Addrs: []string{
-$(for ((i=0; i<TOTAL_NODES; i++)); do
-    echo "        \"${HOST_IP}:$((BASE_PORT + i))\"$([ $i -lt $((TOTAL_NODES-1)) ] && echo ",")"
-done)
-    },
+import "github.com/redis/go-redis/v9"
+
+rdb := redis.NewClusterClient(&redis.ClusterOptions{
+    Addrs:    []string{"${HOST_IP}:${BASE_PORT}"},
     Password: "${REDIS_PASSWORD}",
 })
 \`\`\`
 
 ## 注意事项
 - 使用 -c 参数启用集群模式，支持自动跳转
-- 集群中的每个节点都可以用来访问整个集群
+- 集群中的每个主节点都可以用来访问整个集群
 - 建议使用支持集群的客户端库来连接
-- 提供所有节点地址可以提高可用性和负载均衡
-- 客户端会自动处理节点的故障转移和重新分片
+$(if [ ${REPLICAS} -eq 0 ]; then
+echo "- 当前为无副本模式，不支持故障转移，建议仅用于开发测试环境
+- 如需高可用，建议使用 -r 参数设置副本数 >= 1"
+else
+echo "- 当前配置了 ${REPLICAS} 个副本，支持故障转移和读写分离
+- 副本节点可以分担读取压力，提供数据冗余"
+fi)
 EOF
 }
 

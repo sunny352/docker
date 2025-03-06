@@ -1,7 +1,37 @@
 # MongoDB分片副本集集群
 
-## 简介
-该项目使用Docker和Docker Compose部署一个MongoDB分片副本集集群，包括一个Config Server、两个Shard和一个Mongos路由器。
+## 架构说明
+该项目使用 Docker 和 Docker Compose 部署一个完整的 MongoDB 分片副本集集群，包括：
+
+1. **Mongos 路由服务**
+   - 负责路由客户端请求到适当的分片
+   - 提供统一的访问入口
+   - 实现透明的分片访问
+
+2. **Config Server**
+   - 存储集群的元数据和配置信息
+   - 以副本集模式运行
+   - 管理分片的数据分布
+
+3. **Shard 服务器**
+   - Shard1 和 Shard2 两个分片服务器
+   - 每个分片以副本集模式运行
+   - 存储实际的数据
+
+4. **安全特性**
+   - 启用认证机制（SCRAM-SHA-1）
+   - 使用 keyFile 进行内部认证
+   - 支持用户名密码访问控制
+
+## 系统要求
+- Docker Engine 20.10.0+
+- Docker Compose v2.0.0+
+- 至少 4GB 可用内存
+- 至少 10GB 可用磁盘空间
+- 支持的操作系统：
+  - Linux（推荐）
+  - macOS
+  - Windows（需要 WSL2）
 
 ## 使用说明
 
@@ -12,6 +42,28 @@ cd mongo-shard-replica
 ```
 
 ### 2. 运行初始化脚本
+
+#### 准备工作
+1. 确保 Docker 和 Docker Compose 已正确安装：
+```bash
+docker --version
+docker compose version
+```
+
+2. 确保当前用户有足够权限：
+```bash
+# 如果不在 docker 组，添加当前用户到 docker 组
+sudo usermod -aG docker $USER
+# 重新登录以使权限生效
+```
+
+3. 确保目标端口未被占用：
+```bash
+# 检查默认端口
+nc -zv localhost 27017-27020 2>&1
+```
+
+#### 运行脚本
 ```bash
 chmod +x init.sh
 ./init.sh [选项]
@@ -53,19 +105,24 @@ sudo ./init.sh -n my-cluster -p 27020 -v 6.0 -u admin -w mypassword --host-ip 19
 ```
 
 ### 3. 查看集群连接信息
-脚本执行完成后会：
 
-1. 在终端显示连接信息
-2. 在集群目录下生成一个详细的 README.md 文件，包含：
-   - 集群基本信息（名称、版本、认证信息）
-   - 节点信息（各个服务的地址和端口）
-   - 多种连接方式的详细说明
-   - 各种编程语言的代码示例（Python、Node.js、Java、Go）
-   - 常用管理命令
-   - 集群管理指南
-   - 故障排查指南
-   - 备份恢复方法
-   - 监控建议
+#### 自动生成的信息
+脚本执行完成后会自动生成以下内容：
+
+1. **终端输出**
+   - 集群初始化过程的详细日志
+   - 连接信息和示例命令
+   - 可能的错误和解决方案
+
+2. **README.md 文件**
+   - 完整的集群配置信息
+   - 多语言连接示例
+   - 管理指南和最佳实践
+
+3. **配置文件**
+   - Docker Compose 配置
+   - MongoDB 密钥文件
+   - 各服务的数据目录
 
 生成的连接信息包括：
 
@@ -85,42 +142,137 @@ mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMech
 ```
 
 ### 4. 目录结构
-初始化完成后，会在指定的集群名称目录下创建以下文件和目录：
+初始化完成后的完整目录结构：
 ```
 <cluster-name>/
 ├── compose.yaml          # Docker Compose 配置文件
-├── mongodb.key          # MongoDB 认证密钥文件
+├── mongodb.key          # MongoDB 认证密钥文件（权限：400）
 ├── README.md           # 集群信息和使用说明
 ├── configsvr/          # Config Server 数据目录
+│   └── ...            # Config Server 数据文件
 ├── shard1/            # Shard1 数据目录
+│   └── ...           # Shard1 数据文件
 └── shard2/            # Shard2 数据目录
+    └── ...           # Shard2 数据文件
 ```
 
-### 注意事项
-1. 如果从其他机器连接，请将 `<host-ip>` 替换为服务器的实际可访问IP地址
-2. 确保防火墙已开放所需端口（默认为 27017-27020）
-3. 可以使用以下命令检查端口是否开放：
-```bash
-nc -zv <host-ip> <port>
-```
-4. 如果需要安装mongosh客户端：
-   - MacOS: `brew install mongosh`
-   - Linux: 参考 [MongoDB Shell 安装文档](https://www.mongodb.com/docs/mongodb-shell/install/)
-   - 或使用Docker临时测试连接：
-```bash
-docker run --rm -it mongo:<version> mongosh "mongodb://<username>:<password>@<host-ip>:<port>/admin?authSource=admin&authMechanism=SCRAM-SHA-1"
-```
+### 5. 资源配置说明
+脚本为各服务配置了以下资源限制：
+
+1. **Mongos 路由器**
+   - CPU: 0.5 核心（最小：0.2）
+   - 内存: 1GB（最小：512MB）
+
+2. **Config Server**
+   - CPU: 0.5 核心（最小：0.2）
+   - 内存: 1GB（最小：512MB）
+
+3. **分片服务器**
+   - CPU: 1 核心（最小：0.5）
+   - 内存: 2GB（最小：1GB）
+
+### 6. 安全配置
+1. **认证机制**
+   - 使用 SCRAM-SHA-1 认证
+   - keyFile 用于内部认证
+   - 强制启用授权验证
+
+2. **网络安全**
+   - 使用 Docker 网络隔离
+   - 仅必要端口对外暴露
+   - 支持 TLS/SSL 配置（可选）
+
+3. **访问控制**
+   - 创建管理员用户
+   - 角色基础访问控制
+   - 支持细粒度权限配置
 
 ### 常见问题
-1. 端口被占用
-   - 脚本会自动检查端口占用情况
-   - 如果端口被占用，可以使用 `-p` 参数指定其他起始端口
 
-2. 无法获取主机IP
-   - 脚本会自动尝试多种方法获取主机IP
-   - 如果自动获取失败，可以使用 `--host-ip` 参数手动指定IP地址
+#### 1. 端口被占用
+- **症状**：启动失败，提示端口已被使用
+- **解决方案**：
+  ```bash
+  # 查看端口占用
+  sudo lsof -i :<port>
+  # 使用其他端口启动
+  ./init.sh -p <alternative-port>
+  ```
 
-3. 权限问题
-   - 由于需要设置 mongodb.key 文件权限，脚本需要使用 sudo 运行
-   - 确保运行脚本的用户有足够的权限
+#### 2. 无法获取主机IP
+- **症状**：自动IP检测失败
+- **解决方案**：
+  ```bash
+  # 手动查看IP
+  ifconfig | grep "inet "
+  # 指定IP启动
+  ./init.sh --host-ip <your-ip>
+  ```
+
+#### 3. 权限问题
+- **症状**：mongodb.key 权限设置失败
+- **解决方案**：
+  ```bash
+  # 检查文件权限
+  ls -l mongodb.key
+  # 正确设置权限
+  sudo chmod 400 mongodb.key
+  sudo chown 999:999 mongodb.key
+  ```
+
+#### 4. 内存不足
+- **症状**：容器启动失败或不稳定
+- **解决方案**：
+  - 增加系统可用内存
+  - 调整容器内存限制：
+    ```bash
+    # 编辑 compose.yaml
+    # 修改 deploy.resources.limits.memory 值
+    ```
+
+#### 5. 数据持久化
+- **症状**：重启后数据丢失
+- **解决方案**：
+  - 确保数据目录正确挂载
+  - 检查目录权限：
+    ```bash
+    sudo chown -R 999:999 configsvr/ shard1/ shard2/
+    ```
+
+### 性能优化建议
+
+1. **系统层面**
+   - 禁用透明大页面
+   - 调整系统限制（ulimit）
+   - 使用 XFS 文件系统
+
+2. **MongoDB 配置**
+   - 优化 WiredTiger 缓存大小
+   - 调整连接池参数
+   - 配置适当的写关注
+
+3. **容器配置**
+   - 使用主机网络模式
+   - 调整 CPU 份额
+   - 配置内存限制
+
+### 监控指标
+
+1. **基础指标**
+   - CPU 使用率
+   - 内存使用
+   - 磁盘 IOPS
+   - 网络流量
+
+2. **MongoDB 指标**
+   - 操作延迟
+   - 连接数
+   - 队列长度
+   - 复制延迟
+
+3. **分片特定指标**
+   - 块分布
+   - 平衡器状态
+   - 分片大小
+   - 跨分片查询
 

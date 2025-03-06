@@ -6,6 +6,10 @@ DEFAULT_CONTROLLER_PORT=9093
 DEFAULT_KAFKA_NAME="kafka-single"
 DEFAULT_KAFKA_USERNAME="root"
 DEFAULT_KAFKA_PASSWORD="123456"
+DEFAULT_HEAP_MEMORY="1G"      # 默认堆内存大小
+DEFAULT_CONTAINER_MEMORY="2G"  # 默认容器内存限制
+DEFAULT_CPU_LIMIT="2.0"       # 默认 CPU 限制（核心数）
+DEFAULT_CPU_REQUEST="1.0"     # 默认 CPU 请求（核心数）
 
 # 帮助信息
 show_usage() {
@@ -18,6 +22,10 @@ show_usage() {
     echo "  -u, --username USERNAME   设置Kafka用户名 (默认: ${DEFAULT_KAFKA_USERNAME})"
     echo "  -w, --password PASSWORD   设置Kafka密码 (默认: ${DEFAULT_KAFKA_PASSWORD})"
     echo "  --host-ip IP              手动指定主机IP (可选)"
+    echo "  --heap-memory SIZE        设置JVM堆内存大小 (默认: ${DEFAULT_HEAP_MEMORY})"
+    echo "  --container-memory SIZE   设置容器内存限制 (默认: ${DEFAULT_CONTAINER_MEMORY})"
+    echo "  --cpu-limit CORES         设置CPU核心数上限 (默认: ${DEFAULT_CPU_LIMIT})"
+    echo "  --cpu-request CORES       设置CPU核心数下限 (默认: ${DEFAULT_CPU_REQUEST})"
     exit 1
 }
 
@@ -51,6 +59,22 @@ while [[ $# -gt 0 ]]; do
             MANUAL_HOST_IP="$2"
             shift 2
             ;;
+        --heap-memory)
+            HEAP_MEMORY="$2"
+            shift 2
+            ;;
+        --container-memory)
+            CONTAINER_MEMORY="$2"
+            shift 2
+            ;;
+        --cpu-limit)
+            CPU_LIMIT="$2"
+            shift 2
+            ;;
+        --cpu-request)
+            CPU_REQUEST="$2"
+            shift 2
+            ;;
         *)
             echo "错误: 未知参数 $1"
             show_usage
@@ -64,6 +88,10 @@ CONTROLLER_PORT=${CONTROLLER_PORT:-$DEFAULT_CONTROLLER_PORT}
 KAFKA_NAME=${KAFKA_NAME:-$DEFAULT_KAFKA_NAME}
 KAFKA_USERNAME=${KAFKA_USERNAME:-$DEFAULT_KAFKA_USERNAME}
 KAFKA_PASSWORD=${KAFKA_PASSWORD:-$DEFAULT_KAFKA_PASSWORD}
+HEAP_MEMORY=${HEAP_MEMORY:-$DEFAULT_HEAP_MEMORY}
+CONTAINER_MEMORY=${CONTAINER_MEMORY:-$DEFAULT_CONTAINER_MEMORY}
+CPU_LIMIT=${CPU_LIMIT:-$DEFAULT_CPU_LIMIT}
+CPU_REQUEST=${CPU_REQUEST:-$DEFAULT_CPU_REQUEST}
 
 # 添加IP获取函数
 get_host_ip() {
@@ -180,10 +208,19 @@ services:
       - KAFKA_CFG_SASL_ENABLED_MECHANISMS=PLAIN
       - KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
       - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_HEAP_OPTS=-Xmx${HEAP_MEMORY} -Xms${HEAP_MEMORY}
       - KAFKA_OPTS=-Djava.security.auth.login.config=/bitnami/kafka/config/kafka_jaas.conf
     volumes:
       - ./data:/bitnami/kafka/data
       - ./config:/bitnami/kafka/config
+    deploy:
+      resources:
+        limits:
+          memory: ${CONTAINER_MEMORY}
+          cpus: ${CPU_LIMIT}
+        reservations:
+          memory: ${HEAP_MEMORY}
+          cpus: ${CPU_REQUEST}
 EOL
 
 # 启动docker compose
@@ -455,6 +492,38 @@ cd ./${KAFKA_NAME} && docker compose logs -f
 ## 参考资料
 - [Kafka 官方文档](https://kafka.apache.org/documentation/)
 - [Bitnami Kafka Docker 镜像文档](https://hub.docker.com/r/bitnami/kafka)
+
+## 资源限制配置
+### 内存配置
+- JVM 堆内存: ${HEAP_MEMORY}
+- 容器内存限制: ${CONTAINER_MEMORY}
+
+### CPU 配置
+- CPU 核心数上限: ${CPU_LIMIT}
+- CPU 核心数下限: ${CPU_REQUEST}
+
+要调整资源限制，可以使用以下参数：
+\`\`\`bash
+# 设置内存
+./init.sh --heap-memory 2G --container-memory 4G
+
+# 设置 CPU（支持小数点，如 0.5 表示半个核心）
+./init.sh --cpu-limit 2 --cpu-request 1
+
+# 同时设置内存和 CPU
+./init.sh --heap-memory 2G --container-memory 4G --cpu-limit 2 --cpu-request 1
+\`\`\`
+
+注意事项：
+1. 内存配置：
+   - 容器内存限制（--container-memory）应该总是大于 JVM 堆内存（--heap-memory）
+   - 建议容器内存限制至少比堆内存大 1GB，以给系统和其他开销留出空间
+
+2. CPU 配置：
+   - CPU 限制（--cpu-limit）定义了容器可以使用的最大 CPU 核心数
+   - CPU 请求（--cpu-request）定义了容器需要的最小 CPU 核心数
+   - CPU 值可以使用小数，如 0.5 表示半个核心
+   - 建议 CPU 限制值至少是请求值的 1.5 倍，以处理流量突发
 EOT
 }
 

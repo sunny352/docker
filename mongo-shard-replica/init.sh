@@ -217,6 +217,15 @@ services:
       - ./mongodb.key:/data/mongodb.key:ro
     networks:
       - mongo_cluster_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 512M
+    restart: unless-stopped
 
   # Router
   mongos:
@@ -237,6 +246,15 @@ services:
       - ./mongodb.key:/data/mongodb.key:ro
     networks:
       - mongo_cluster_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 512M
+    restart: unless-stopped
 
   # Shard 1
   shard1:
@@ -257,6 +275,15 @@ services:
       - ./mongodb.key:/data/mongodb.key:ro
     networks:
       - mongo_cluster_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    restart: unless-stopped
 
   # Shard 2
   shard2:
@@ -277,6 +304,15 @@ services:
       - ./mongodb.key:/data/mongodb.key:ro
     networks:
       - mongo_cluster_net
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    restart: unless-stopped
 EOF
 
 # 启动容器

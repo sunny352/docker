@@ -10,6 +10,8 @@
 - 自动检测主机 IP 和端口占用
 - 支持自定义认证信息
 - 提供完整的连接信息和示例代码
+- 支持自定义资源限制（内存和CPU）
+- 自动生成详细的部署文档
 
 ## 使用方法
 
@@ -25,6 +27,10 @@
 - 服务名称：kafka-single
 - 用户名：root
 - 密码：123456
+- JVM 堆内存：1G
+- 容器内存限制：2G
+- CPU 核心数上限：2.0
+- CPU 核心数下限：1.0
 
 ### 2. 自定义配置
 
@@ -40,6 +46,10 @@
 - `-u, --username USERNAME`   设置 Kafka 用户名 (默认: root)
 - `-w, --password PASSWORD`   设置 Kafka 密码 (默认: 123456)
 - `--host-ip IP`             手动指定主机 IP (可选)
+- `--heap-memory SIZE`        设置 JVM 堆内存大小 (默认: 1G)
+- `--container-memory SIZE`   设置容器内存限制 (默认: 2G)
+- `--cpu-limit CORES`         设置 CPU 核心数上限 (默认: 2.0)
+- `--cpu-request CORES`       设置 CPU 核心数下限 (默认: 1.0)
 
 ### 3. 示例
 
@@ -51,6 +61,11 @@
 使用自定义用户名和密码：
 ```bash
 ./init.sh -u admin -w mypassword
+```
+
+自定义资源限制：
+```bash
+./init.sh --heap-memory 2G --container-memory 4G --cpu-limit 4.0 --cpu-request 2.0
 ```
 
 ## 端口说明
@@ -106,3 +121,36 @@ kafka-single/
    - 使用强密码
    - 配置防火墙规则
    - 考虑启用 SSL/TLS 加密
+
+## 资源限制配置
+
+### 内存配置
+- JVM 堆内存配置（--heap-memory）
+  - 默认值：1G
+  - 建议值：根据实际负载调整
+  - 示例：--heap-memory 2G
+
+- 容器内存限制（--container-memory）
+  - 默认值：2G
+  - 建议值：至少比堆内存大 1GB
+  - 示例：--container-memory 4G
+
+### CPU 配置
+- CPU 核心数上限（--cpu-limit）
+  - 默认值：2.0
+  - 说明：容器可使用的最大 CPU 核心数
+  - 示例：--cpu-limit 4.0
+
+- CPU 核心数下限（--cpu-request）
+  - 默认值：1.0
+  - 说明：容器需要的最小 CPU 核心数
+  - 示例：--cpu-request 2.0
+
+注意事项：
+1. 内存配置：
+   - 容器内存限制应该总是大于 JVM 堆内存
+   - 建议容器内存限制至少比堆内存大 1GB，以给系统和其他开销留出空间
+
+2. CPU 配置：
+   - CPU 值支持小数点，如 0.5 表示半个核心
+   - 建议 CPU 限制值至少是请求值的 1.5 倍，以处理流量突发
