@@ -6,6 +6,8 @@ DEFAULT_BASE_PORT=9092
 DEFAULT_KAFKA_VERSION="3.9.0"
 DEFAULT_BROKERS=3
 DEFAULT_CONTROLLER_PORT=9093
+DEFAULT_USERNAME="root"
+DEFAULT_PASSWORD="123456"
 
 # 帮助信息
 show_usage() {
@@ -17,6 +19,8 @@ show_usage() {
     echo "  -v, --version VERSION     设置Kafka版本 (默认: ${DEFAULT_KAFKA_VERSION})"
     echo "  -b, --brokers BROKERS     设置broker数量 (默认: ${DEFAULT_BROKERS})"
     echo "  --host-ip IP              手动指定主机IP (可选)"
+    echo "  -u, --username USERNAME   设置SASL用户名 (默认: ${DEFAULT_USERNAME})"
+    echo "  -w, --password PASSWORD   设置SASL密码 (默认: ${DEFAULT_PASSWORD})"
     exit 1
 }
 
@@ -46,6 +50,14 @@ while [[ $# -gt 0 ]]; do
             MANUAL_HOST_IP="$2"
             shift 2
             ;;
+        -u|--username)
+            USERNAME="$2"
+            shift 2
+            ;;
+        -w|--password)
+            PASSWORD="$2"
+            shift 2
+            ;;
         *)
             echo "错误: 未知参数 $1"
             show_usage
@@ -58,6 +70,8 @@ CLUSTER_NAME=${CLUSTER_NAME:-$DEFAULT_CLUSTER_NAME}
 BASE_PORT=${BASE_PORT:-$DEFAULT_BASE_PORT}
 KAFKA_VERSION=${KAFKA_VERSION:-$DEFAULT_KAFKA_VERSION}
 BROKERS=${BROKERS:-$DEFAULT_BROKERS}
+USERNAME=${USERNAME:-$DEFAULT_USERNAME}
+PASSWORD=${PASSWORD:-$DEFAULT_PASSWORD}
 
 # 验证必要参数
 if ! [[ "$BASE_PORT" =~ ^[0-9]+$ ]] || [ "$BASE_PORT" -lt 1024 ] || [ "$BASE_PORT" -gt 65535 ]; then
@@ -144,6 +158,22 @@ HOST_IP=$(get_host_ip)
 # 创建集群目录
 mkdir -p ./${CLUSTER_NAME}
 
+# 生成JAAS配置文件
+cat > ./${CLUSTER_NAME}/kafka_server_jaas.conf <<EOF
+KafkaServer {
+    org.apache.kafka.common.security.plain.PlainLoginModule required
+    username="${USERNAME}"
+    password="${PASSWORD}"
+    user_${USERNAME}="${PASSWORD}";
+};
+
+Client {
+    org.apache.kafka.common.security.plain.PlainLoginModule required
+    username="${USERNAME}"
+    password="${PASSWORD}";
+};
+EOF
+
 # 生成docker-compose.yml
 cat > ./${CLUSTER_NAME}/compose.yaml <<EOF
 networks:
@@ -171,15 +201,20 @@ for ((i=0; i<BROKERS; i++)); do
       - KAFKA_NODE_ID=${i}
       - KAFKA_PROCESS_ROLES=broker,controller
       - KAFKA_CONTROLLER_QUORUM_VOTERS=$(for ((j=0;j<BROKERS;j++)); do echo -n "$j@kafka-$j:9093"; if [ $j -lt $((BROKERS-1)) ]; then echo -n ","; fi; done)
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_LISTENERS=PLAINTEXT://kafka-${i}:9092,CONTROLLER://kafka-${i}:9093
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${HOST_IP}:${NODE_PORT}
       - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
+      - KAFKA_SECURITY_INTER_BROKER_PROTOCOL=SASL_PLAINTEXT
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
     volumes:
       - ./kafka-${i}/data:/var/lib/kafka/data
+      - ./kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
     networks:
       kafka_net:
         aliases:
@@ -260,6 +295,9 @@ if [ $READY_COUNT -eq $BROKERS ]; then
 - 集群名称: ${CLUSTER_NAME}
 - Kafka 版本: ${KAFKA_VERSION}
 - Broker 数量: ${BROKERS}
+- 认证信息：
+  - 用户名：${USERNAME}
+  - 密码：${PASSWORD}
 - 使用 KRaft 模式（无需 Zookeeper）
 
 ## 连接地址
@@ -269,40 +307,53 @@ done)
 
 ## 基本使用示例
 
+### 创建 client.properties 文件
+首先创建包含认证信息的配置文件：
+
+\`\`\`bash
+cat > client.properties <<EOF
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=PLAIN
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${USERNAME}" password="${PASSWORD}";
+EOF
+\`\`\`
+
 ### 创建 Topic
 \`\`\`bash
 # 创建一个包含3个分区、2个副本的 topic
-docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --create --topic my-topic --partitions 3 --replication-factor 2 --bootstrap-server kafka-0:9092
+docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --create --topic my-topic --partitions 3 --replication-factor 2 --bootstrap-server kafka-0:9092 --command-config /etc/kafka/client.properties
 \`\`\`
 
 ### 查看 Topic 列表
 \`\`\`bash
-docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --list --bootstrap-server kafka-0:9092
+docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --list --bootstrap-server kafka-0:9092 --command-config /etc/kafka/client.properties
 \`\`\`
 
 ### 生产消息
 \`\`\`bash
 # 使用控制台生产者发送消息
-docker exec -it ${CLUSTER_NAME}_kafka_0 kafka-console-producer.sh --topic my-topic --bootstrap-server kafka-0:9092
+docker exec -it ${CLUSTER_NAME}_kafka_0 kafka-console-producer.sh --topic my-topic --bootstrap-server kafka-0:9092 --producer.config /etc/kafka/client.properties
 \`\`\`
 
 ### 消费消息
 \`\`\`bash
 # 使用控制台消费者接收消息
-docker exec -it ${CLUSTER_NAME}_kafka_0 kafka-console-consumer.sh --topic my-topic --from-beginning --bootstrap-server kafka-0:9092
+docker exec -it ${CLUSTER_NAME}_kafka_0 kafka-console-consumer.sh --topic my-topic --from-beginning --bootstrap-server kafka-0:9092 --consumer.config /etc/kafka/client.properties
 \`\`\`
 
 ### 查看 Topic 详情
 \`\`\`bash
-docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --describe --topic my-topic --bootstrap-server kafka-0:9092
+docker exec ${CLUSTER_NAME}_kafka_0 kafka-topics.sh --describe --topic my-topic --bootstrap-server kafka-0:9092 --command-config /etc/kafka/client.properties
 \`\`\`
 
 ## 使用客户端连接
-在客户端配置中使用以下 bootstrap servers:
-\`\`\`
-$(for ((i=0; i<BROKERS; i++)); do
-echo "${HOST_IP}:$((BASE_PORT + i))"
-done)
+在客户端配置中使用以下配置：
+
+\`\`\`properties
+bootstrap.servers=$(for ((i=0; i<BROKERS; i++)); do echo -n "${HOST_IP}:$((BASE_PORT + i))"; if [ $i -lt $((BROKERS-1)) ]; then echo -n ","; fi; done)
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=PLAIN
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="${USERNAME}" password="${PASSWORD}";
 \`\`\`
 
 ## 管理命令
