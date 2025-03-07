@@ -5,7 +5,7 @@ DEFAULT_CLUSTER_NAME="redis-cluster1"
 DEFAULT_BASE_PORT=6379
 DEFAULT_REDIS_VERSION="7.2"
 DEFAULT_REDIS_PASSWORD="123456"
-DEFAULT_SHARDS=2
+DEFAULT_SHARDS=3
 DEFAULT_REPLICAS=0
 DEFAULT_CPU_LIMIT="0.5"
 DEFAULT_MEMORY_LIMIT="512M"
@@ -19,7 +19,7 @@ show_usage() {
     echo "  -p, --port PORT           设置基础端口号 (默认: ${DEFAULT_BASE_PORT})"
     echo "  -v, --version VERSION     设置Redis版本 (默认: ${DEFAULT_REDIS_VERSION})"
     echo "  -w, --password PASSWORD   设置Redis密码 (默认: ${DEFAULT_REDIS_PASSWORD})"
-    echo "  -s, --shards SHARDS      设置分片数量 (默认: ${DEFAULT_SHARDS})"
+    echo "  -s, --shards SHARDS      设置分片数量 (默认: ${DEFAULT_SHARDS}，最少3个)"
     echo "  -r, --replicas REPLICAS  设置每个分片的副本数 (默认: ${DEFAULT_REPLICAS}，0表示无副本)"
     echo "  --host-ip IP              手动指定主机IP (可选)"
     echo "  --cpu CPU                设置CPU限制 (默认: ${DEFAULT_CPU_LIMIT})"
@@ -89,6 +89,14 @@ MEMORY_LIMIT=${MEMORY_LIMIT:-$DEFAULT_MEMORY_LIMIT}
 # 验证必要参数
 if ! [[ "$BASE_PORT" =~ ^[0-9]+$ ]] || [ "$BASE_PORT" -lt 1024 ] || [ "$BASE_PORT" -gt 65535 ]; then
     echo "错误: 端口号必须是1024-65535之间的数字"
+    exit 1
+fi
+
+# 验证分片数量
+if [ "$SHARDS" -lt 3 ]; then
+    echo "错误: Redis集群至少需要3个主节点（分片）"
+    echo "提示: 请使用 --shards 参数指定至少3个分片，例如："
+    echo "  ./init.sh --external-ip <IP> --shards 3"
     exit 1
 fi
 
@@ -302,14 +310,18 @@ for ((i=0; i<SHARDS; i++)); do
 done
 
 # 创建集群
+echo "正在创建集群..."
 docker exec -it ${CLUSTER_NAME}_redis_0 redis-cli -a ${REDIS_PASSWORD} --cluster create ${REDIS_NODES} --cluster-replicas ${REPLICAS} --cluster-yes
+
+# 等待集群就绪
+sleep 5
 
 # 验证集群状态
 echo "验证集群状态..."
 docker exec -it ${CLUSTER_NAME}_redis_0 redis-cli -a ${REDIS_PASSWORD} cluster info
 
-# 验证集群连接
-echo "验证集群连接..."
+# 验证集群节点和槽位分配
+echo "验证集群节点和槽位分配..."
 docker exec -it ${CLUSTER_NAME}_redis_0 redis-cli -a ${REDIS_PASSWORD} cluster nodes
 
 # 生成集群信息和连接说明
