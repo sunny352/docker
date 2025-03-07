@@ -33,6 +33,10 @@ chmod +x init.sh
   --host-ip IP             手动指定主机IP (可选)
   -u, --username USERNAME   设置SASL用户名 (默认: root)
   -w, --password PASSWORD   设置SASL密码 (默认: 123456)
+  --heap-memory SIZE       设置JVM堆内存大小 (默认: 512M)
+  --container-memory SIZE  设置容器内存限制 (默认: 1G)
+  --cpu-limit CORES       设置CPU核心数上限 (默认: 1.0)
+  --cpu-request CORES     设置CPU核心数下限 (默认: 0.5)
 ```
 
 ### 使用示例
@@ -52,6 +56,9 @@ chmod +x init.sh
 # 指定认证信息
 ./init.sh -u admin -w secret123
 
+# 指定资源限制
+./init.sh --heap-memory 1G --container-memory 2G --cpu-limit 2.0 --cpu-request 1.0
+
 # 组合使用多个参数
 ./init.sh -n my-kafka -p 9092 -v 3.9.0 -b 5 --host-ip 192.168.1.100 -u admin -w secret123
 ```
@@ -62,197 +69,99 @@ chmod +x init.sh
 <cluster-name>/
 ├── compose.yaml          # Docker Compose 配置文件
 ├── README.md            # 集群信息和使用说明
-├── kafka_server_jaas.conf # SASL 认证配置文件
-├── kafka-0/            # 第一个 broker 的数据目录
-├── kafka-1/            # 第二个 broker 的数据目录
-└── kafka-2/            # 第三个 broker 的数据目录（如果配置了3个broker）
+├── kafka_jaas.conf     # SASL 认证配置文件
+├── client.properties   # 客户端配置文件
+├── kafka-0/            # 第一个 broker 的数据和配置目录
+│   ├── data/          # 数据目录
+│   └── config/        # 配置目录
+├── kafka-1/            # 第二个 broker 的数据和配置目录
+└── kafka-2/            # 第三个 broker 的数据和配置目录（如果配置了3个broker）
 ```
 
-### 4. 认证配置
-集群默认启用了 SASL/PLAIN 认证。在使用客户端工具之前，需要创建包含认证信息的配置文件：
+### 4. 客户端配置
+集群默认启用了 SASL/PLAIN 认证。客户端连接时需要使用以下配置：
 
-```bash
-# 创建 client.properties 文件
-cat > client.properties <<EOF
+```properties
+bootstrap.servers=<host-ip>:9092,<host-ip>:9093,<host-ip>:9094
 security.protocol=SASL_PLAINTEXT
 sasl.mechanism=PLAIN
 sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="root" password="123456";
-EOF
 ```
 
 注意：请根据实际设置的用户名和密码修改上述配置。
 
-### 5. 基本操作示例
+### 5. 常用命令示例
 
-#### 创建 Topic
+#### 创建主题
 ```bash
-# 创建一个包含3个分区、2个副本的 topic
 docker exec <cluster-name>_kafka_0 kafka-topics.sh \
     --create \
-    --topic my-topic \
+    --topic test \
     --partitions 3 \
     --replication-factor 2 \
-    --bootstrap-server kafka-0:9092 \
-    --command-config /etc/kafka/client.properties
+    --bootstrap-server localhost:9092 \
+    --command-config /bitnami/kafka/config/client.properties
 ```
 
-#### 查看 Topic 列表
+#### 查看主题列表
 ```bash
 docker exec <cluster-name>_kafka_0 kafka-topics.sh \
     --list \
-    --bootstrap-server kafka-0:9092 \
-    --command-config /etc/kafka/client.properties
+    --bootstrap-server localhost:9092 \
+    --command-config /bitnami/kafka/config/client.properties
+```
+
+#### 查看主题详情
+```bash
+docker exec <cluster-name>_kafka_0 kafka-topics.sh \
+    --describe \
+    --topic test \
+    --bootstrap-server localhost:9092 \
+    --command-config /bitnami/kafka/config/client.properties
 ```
 
 #### 生产消息
 ```bash
-# 使用控制台生产者发送消息
 docker exec -it <cluster-name>_kafka_0 kafka-console-producer.sh \
-    --topic my-topic \
-    --bootstrap-server kafka-0:9092 \
-    --producer.config /etc/kafka/client.properties
+    --topic test \
+    --bootstrap-server localhost:9092 \
+    --producer.config /bitnami/kafka/config/client.properties
 ```
 
 #### 消费消息
 ```bash
-# 使用控制台消费者接收消息
 docker exec -it <cluster-name>_kafka_0 kafka-console-consumer.sh \
-    --topic my-topic \
+    --topic test \
     --from-beginning \
-    --bootstrap-server kafka-0:9092 \
-    --consumer.config /etc/kafka/client.properties
+    --bootstrap-server localhost:9092 \
+    --consumer.config /bitnami/kafka/config/client.properties
 ```
 
-#### 查看 Topic 详情
+### 6. 集群管理
+
+#### 启动集群
 ```bash
-docker exec <cluster-name>_kafka_0 kafka-topics.sh \
-    --describe \
-    --topic my-topic \
-    --bootstrap-server kafka-0:9092 \
-    --command-config /etc/kafka/client.properties
+cd <cluster-name>
+docker compose up -d
 ```
 
-### 6. 客户端连接示例
-
-#### Java (使用 kafka-clients)
-```java
-Properties props = new Properties();
-props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "<host-ip>:9092,<host-ip>:9093,<host-ip>:9094");
-props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-// SASL 认证配置
-props.put("security.protocol", "SASL_PLAINTEXT");
-props.put("sasl.mechanism", "PLAIN");
-props.put("sasl.jaas.config", 
-    "org.apache.kafka.common.security.plain.PlainLoginModule required " +
-    "username=\"root\" " +
-    "password=\"123456\";");
-
-KafkaProducer<String, String> producer = new KafkaProducer<>(props);
+#### 停止集群
+```bash
+cd <cluster-name>
+docker compose down
 ```
 
-#### Python (使用 kafka-python)
-```python
-from kafka import KafkaConsumer, KafkaProducer
-
-# SASL 认证配置
-sasl_config = {
-    'security.protocol': 'SASL_PLAINTEXT',
-    'sasl.mechanism': 'PLAIN',
-    'sasl.username': 'root',
-    'sasl.password': '123456'
-}
-
-# 生产者
-producer = KafkaProducer(
-    bootstrap_servers=['<host-ip>:9092', '<host-ip>:9093', '<host-ip>:9094'],
-    **sasl_config
-)
-
-# 消费者
-consumer = KafkaConsumer(
-    'my-topic',
-    bootstrap_servers=['<host-ip>:9092', '<host-ip>:9093', '<host-ip>:9094'],
-    auto_offset_reset='earliest',
-    enable_auto_commit=True,
-    group_id='my-group',
-    **sasl_config
-)
-```
-
-#### Node.js (使用 kafkajs)
-```javascript
-const { Kafka } = require('kafkajs')
-
-const kafka = new Kafka({
-  clientId: 'my-app',
-  brokers: ['<host-ip>:9092', '<host-ip>:9093', '<host-ip>:9094'],
-  sasl: {
-    mechanism: 'plain',
-    username: 'root',
-    password: '123456'
-  },
-  ssl: false
-})
-```
-
-#### Go (使用 Sarama)
-```go
-package main
-
-import (
-    "log"
-    "github.com/Shopify/sarama"
-)
-
-func main() {
-    // 生产者配置
-    config := sarama.NewConfig()
-    config.Producer.Return.Successes = true
-    config.Producer.RequiredAcks = sarama.WaitForAll
-    config.Producer.Retry.Max = 5
-    
-    // SASL 认证配置
-    config.Net.SASL.Enable = true
-    config.Net.SASL.Mechanism = sarama.SASLTypePlaintext
-    config.Net.SASL.User = "root"
-    config.Net.SASL.Password = "123456"
-    config.Net.SASL.Handshake = true
-
-    // 连接 Kafka 集群
-    brokers := []string{"<host-ip>:9092", "<host-ip>:9093", "<host-ip>:9094"}
-    
-    // 创建生产者
-    producer, err := sarama.NewSyncProducer(brokers, config)
-    if err != nil {
-        log.Fatalf("Error creating producer: %v", err)
-    }
-    defer producer.Close()
-
-    // 发送消息
-    msg := &sarama.ProducerMessage{
-        Topic: "my-topic",
-        Value: sarama.StringEncoder("Hello from Go!"),
-    }
-    
-    // 同步发送
-    partition, offset, err := producer.SendMessage(msg)
-    if err != nil {
-        log.Printf("Failed to send message: %v", err)
-    } else {
-        log.Printf("Message sent to partition %d at offset %d", partition, offset)
-    }
-}
+#### 查看日志
+```bash
+cd <cluster-name>
+docker compose logs -f
 ```
 
 ### 注意事项
 1. 如果从其他机器连接，请将 `<host-ip>` 替换为服务器的实际可访问IP地址
 2. 确保防火墙已开放所需端口（默认为 9092 及后续端口）
 3. 所有客户端连接都需要配置正确的 SASL 认证信息
-4. 可以使用以下命令检查端口是否开放：
-```bash
-nc -zv <host-ip> <port>
-```
+4. 建议根据实际需求调整内存和CPU限制
 
 ### 常见问题
 1. 端口被占用
@@ -266,10 +175,9 @@ nc -zv <host-ip> <port>
 3. 认证失败
    - 检查客户端配置中的用户名和密码是否正确
    - 确保使用了正确的 SASL 配置
-   - 检查服务器端的 JAAS 配置是否正确
 
 4. 集群启动失败
-   - 检查 Docker 日志：`docker-compose logs -f`
+   - 检查 Docker 日志：`docker compose logs -f`
    - 确保分配了足够的系统资源（内存、CPU）
    - 检查端口是否被占用
    - 检查数据目录权限
